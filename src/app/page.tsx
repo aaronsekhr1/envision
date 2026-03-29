@@ -27,10 +27,10 @@ export default function HomePage() {
   const [newVizOpen, setNewVizOpen] = useState(false);
   const [newName, setNewName] = useState('');
 
+  // Load on mount — middleware already verified auth and set cookies
   useEffect(() => {
-    if (!user) return;
     loadData();
-  }, [user]);
+  }, []);
 
   async function loadData() {
     if (!user) return;

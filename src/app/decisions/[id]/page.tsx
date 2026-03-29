@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Fragment } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { Modal } from '@/components/Modal';
@@ -68,10 +68,10 @@ export default function DecisionPage() {
   const [lbIndex, setLbIndex] = useState(0);
   const [lbOpen, setLbOpen] = useState(false);
 
-  // Load state when user is authenticated
+  // Load state on mount — middleware already verified auth and set cookies
   useEffect(() => {
-    if (user) reload();
-  }, [user]);
+    reload();
+  }, []);
 
   // Keyboard navigation
   useEffect(() => {
@@ -674,15 +674,17 @@ export default function DecisionPage() {
               ))}
               <div />
 
-              {/* Rows: Options */}
+              {/* Rows: Options — each child must be a direct grid child */}
               {state.options.map((option, rowIdx) => (
-                <div key={option.id}>
+                <Fragment key={option.id}>
                   {/* Option label column */}
                   <div
                     className="flex flex-col items-start gap-2"
                     style={{
                       minHeight: 200,
                       paddingRight: 8,
+                      gridColumn: '1',
+                      gridRow: `${rowIdx + 2}`,
                     }}
                   >
                     <div className="flex items-center gap-2">
@@ -743,11 +745,11 @@ export default function DecisionPage() {
                   </div>
 
                   {/* Cells for this option */}
-                  {state.rooms.map((room) => (
+                  {state.rooms.map((room, colIdx) => (
                     <div
                       key={`${option.id}-${room.id}`}
                       style={{
-                        gridColumn: `${state.rooms.indexOf(room) + 2}`,
+                        gridColumn: `${colIdx + 2}`,
                         gridRow: `${rowIdx + 2}`,
                       }}
                     >
@@ -777,7 +779,7 @@ export default function DecisionPage() {
                       +
                     </button>
                   </div>
-                </div>
+                </Fragment>
               ))}
 
               {/* Add option row */}

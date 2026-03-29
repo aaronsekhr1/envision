@@ -94,9 +94,10 @@ export default function VisualizerPage() {
     setLoading(false);
   }, [projectId, router]);
 
+  // Load on mount — middleware already verified auth and set cookies
   useEffect(() => {
-    if (user) reload();
-  }, [user, reload]);
+    reload();
+  }, [reload]);
 
   function toggleCategory(catId: number) {
     setActiveCatIds((prev) => {
