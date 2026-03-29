@@ -544,42 +544,58 @@ export default function VisualizerPage() {
 
           {/* ── Main Area ── */}
           <div style={{ background: '#faf9f7', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            {/* Category Toggle Chips — separate row */}
+            {allValidCats.length > 0 && (
+              <div
+                style={{
+                  padding: '14px 32px',
+                  background: '#fff',
+                  borderBottom: '1px solid #e8e6e2',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <span className="text-xs font-bold uppercase" style={{ color: '#999', letterSpacing: '0.06em', marginRight: 4 }}>
+                  Show:
+                </span>
+                {allValidCats.map((cat) => {
+                  const isActive = activeCatIds.has(cat.id);
+                  return (
+                    <button
+                      key={cat.id}
+                      onClick={() => toggleCategory(cat.id)}
+                      style={{
+                        padding: '7px 18px',
+                        borderRadius: 999,
+                        border: isActive ? '2px solid #1a1a1a' : '2px solid #ddd',
+                        background: isActive ? '#1a1a1a' : '#fff',
+                        color: isActive ? '#fff' : '#888',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        fontFamily: 'inherit',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {cat.name} ({cat.options.length})
+                    </button>
+                  );
+                })}
+                {combos.length > 0 && (
+                  <span className="text-xs" style={{ color: '#aaa', fontFamily: 'monospace', marginLeft: 8 }}>
+                    {formulaStr}
+                  </span>
+                )}
+              </div>
+            )}
+
             {/* Toolbar */}
             <div
               className="flex items-center gap-2.5 flex-wrap"
               style={{ padding: '11px 32px', background: 'var(--bg-card)', borderBottom: '1px solid #e8e6e2' }}
             >
-              {/* Category toggle chips */}
-              {allValidCats.length > 0 && (
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {allValidCats.map((cat) => {
-                    const isActive = activeCatIds.has(cat.id);
-                    return (
-                      <button
-                        key={cat.id}
-                        onClick={() => toggleCategory(cat.id)}
-                        className="text-xs font-semibold rounded-full cursor-pointer transition-all"
-                        style={{
-                          padding: '5px 14px',
-                          border: isActive ? '1.5px solid #1a1a1a' : '1.5px solid #e0dcd8',
-                          background: isActive ? '#1a1a1a' : '#fff',
-                          color: isActive ? '#fff' : '#999',
-                          fontFamily: 'inherit',
-                        }}
-                      >
-                        {cat.name} ({cat.options.length})
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {combos.length > 0 && (
-                <span className="text-xs" style={{ color: '#aaa', fontFamily: 'monospace' }}>
-                  {formulaStr}
-                </span>
-              )}
-
               <div style={{ flex: 1 }} />
 
               {batchProgress && (
