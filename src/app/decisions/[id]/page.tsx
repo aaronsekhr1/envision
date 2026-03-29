@@ -68,10 +68,10 @@ export default function DecisionPage() {
   const [lbIndex, setLbIndex] = useState(0);
   const [lbOpen, setLbOpen] = useState(false);
 
-  // Load state on mount
+  // Load state when user is authenticated
   useEffect(() => {
-    reload();
-  }, []);
+    if (user) reload();
+  }, [user]);
 
   // Keyboard navigation
   useEffect(() => {
