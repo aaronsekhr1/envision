@@ -70,6 +70,7 @@ export interface VizOption {
   name: string;
   photo: string | null; // base64
   mime: string | null;
+  placement: string | null; // e.g. "center of room floor", "back wall"
   sort_order: number;
 }
 

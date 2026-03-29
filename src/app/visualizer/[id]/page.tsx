@@ -15,13 +15,13 @@ import {
   saveVizRendering,
   updateVizRoomPhoto,
   dbDelete,
-  dbDeleteWhere,
 } from '@/lib/db';
 import { useSettings } from '@/hooks/use-settings';
 import { useAuth } from '@/hooks/use-auth';
 import { resizeImage, isHeic } from '@/lib/image-utils';
 import { callGemini } from '@/lib/gemini';
-import type { VizState, VizOption } from '@/lib/types';
+import type { GeminiPiece } from '@/lib/gemini';
+import type { VizState } from '@/lib/types';
 
 const CONCURRENCY = 2;
 
@@ -32,6 +32,7 @@ interface Combo {
   optName: string;
   photo: string | null;
   mime: string | null;
+  placement: string | null;
 }
 
 export default function VisualizerPage() {
@@ -43,8 +44,6 @@ export default function VisualizerPage() {
 
   const [state, setState] = useState<VizState | null>(null);
   const [loading, setLoading] = useState(true);
-  const [rowCatIdx, setRowCatIdx] = useState(0);
-  const [colCatIdx, setColCatIdx] = useState(1);
 
   // Batch generation
   const batchCancelled = useRef(false);
@@ -64,6 +63,7 @@ export default function VisualizerPage() {
   const [optPreview, setOptPreview] = useState('');
   const [optCatId, setOptCatId] = useState<number | null>(null);
   const [optName, setOptName] = useState('');
+  const [optPlacement, setOptPlacement] = useState('');
   const [catName, setCatName] = useState('');
 
   // Lightbox
@@ -87,24 +87,34 @@ export default function VisualizerPage() {
     if (user) reload();
   }, [user, reload]);
 
-  // ── Combination logic ──
+  // ── N-Category Cross-Product Combination Logic ──
 
   function getCombinations(): Combo[][] {
     if (!state) return [];
     const validCats = state.categories.filter((c) => c.options.length > 0);
-    if (validCats.length < 2) return [];
-    const rowCat = validCats[rowCatIdx % validCats.length];
-    const colCat = validCats[colCatIdx % validCats.length];
-    if (!rowCat || !colCat || rowCat.id === colCat.id) return [];
+    if (validCats.length === 0) return [];
 
-    const combos: Combo[][] = [];
-    for (const rowOpt of rowCat.options) {
-      for (const colOpt of colCat.options) {
-        combos.push([
-          { catId: rowCat.id, catName: rowCat.name, optId: rowOpt.id, optName: rowOpt.name, photo: rowOpt.photo, mime: rowOpt.mime },
-          { catId: colCat.id, catName: colCat.name, optId: colOpt.id, optName: colOpt.name, photo: colOpt.photo, mime: colOpt.mime },
-        ]);
+    // N-dimensional cross-product: multiply all categories together
+    let combos: Combo[][] = [[]];
+    for (const cat of validCats) {
+      const next: Combo[][] = [];
+      for (const existing of combos) {
+        for (const opt of cat.options) {
+          next.push([
+            ...existing,
+            {
+              catId: cat.id,
+              catName: cat.name,
+              optId: opt.id,
+              optName: opt.name,
+              photo: opt.photo,
+              mime: opt.mime,
+              placement: opt.placement ?? null,
+            },
+          ]);
+        }
       }
+      combos = next;
     }
     return combos;
   }
@@ -130,17 +140,36 @@ export default function VisualizerPage() {
       const [catId, optId] = p.split('-').map(Number);
       const cat = state.categories.find((c) => c.id === catId);
       const opt = cat?.options.find((o) => o.id === optId);
-      return { catName: cat?.name || '', optName: opt?.name || '', photo: opt?.photo || '', mime: opt?.mime || '' };
+      return {
+        catName: cat?.name || '',
+        optName: opt?.name || '',
+        photo: opt?.photo || '',
+        mime: opt?.mime || '',
+        placement: opt?.placement ?? null,
+      };
     });
 
     // Mark loading
     setState((prev) => {
       if (!prev) return prev;
-      return { ...prev, results: { ...prev.results, [key]: { id: 0, project_id: projectId, combination_key: key, mime: null, data: null, error: null, loading: true } } };
+      return {
+        ...prev,
+        results: {
+          ...prev.results,
+          [key]: { id: 0, project_id: projectId, combination_key: key, mime: null, data: null, error: null, loading: true },
+        },
+      };
     });
 
     try {
-      const pieces = parts.filter((p) => p.photo).map((p) => ({ name: p.optName, data: p.photo!, mime: p.mime! }));
+      const pieces: GeminiPiece[] = parts
+        .filter((p) => p.photo)
+        .map((p) => ({
+          name: `${p.catName}: ${p.optName}`,
+          data: p.photo!,
+          mime: p.mime!,
+          placement: p.placement,
+        }));
       const result = await callGemini(apiKey, model, pieces, state.project.room_photo!, state.project.room_mime!);
       await saveVizRendering(projectId, key, result.imageMime, result.imageData);
       await reload();
@@ -156,43 +185,86 @@ export default function VisualizerPage() {
   // ── Batch render ──
 
   async function handleGenerateAll() {
-    if (!state || !apiKey || !state.project.room_photo) return;
-    const combos = getCombinations();
-    const missing = combos.filter((c) => !state.results[comboKey(c)]?.data);
-    if (!missing.length) { showToast('All combinations rendered'); return; }
-
-    batchCancelled.current = false;
-    const total = missing.length;
-    let done = 0;
-    const startTime = Date.now();
-    setBatchProgress({ done: 0, total, eta: 'calculating...' });
-
-    for (let i = 0; i < missing.length; i += CONCURRENCY) {
-      if (batchCancelled.current) break;
-      const batch = missing.slice(i, i + CONCURRENCY);
-      await Promise.allSettled(
-        batch.map(async (combo) => {
-          if (batchCancelled.current) return;
-          const key = comboKey(combo);
-          const pieces = combo.filter((c) => c.photo).map((c) => ({ name: c.optName, data: c.photo!, mime: c.mime! }));
-          try {
-            const result = await callGemini(apiKey, model, pieces, state.project.room_photo!, state.project.room_mime!);
-            await saveVizRendering(projectId, key, result.imageMime, result.imageData);
-          } catch (e) {
-            await saveVizRendering(projectId, key, null, null, (e as Error).message);
-          }
-          done++;
-          const elapsed = Date.now() - startTime;
-          const perItem = elapsed / done;
-          const remaining = (total - done) * perItem;
-          setBatchProgress({ done, total, eta: remaining < 60000 ? `~${Math.ceil(remaining / 1000)}s` : `~${Math.ceil(remaining / 60000)}min` });
-        })
-      );
+    if (!state) return;
+    if (!apiKey) {
+      showToast('Enter your Gemini API key in the header first');
+      return;
+    }
+    if (!state.project.room_photo) {
+      showToast('Upload a room photo first');
+      return;
     }
 
-    await reload();
-    setBatchProgress(null);
-    showToast(batchCancelled.current ? 'Cancelled' : `Done — ${done} rendered`);
+    try {
+      const combos = getCombinations();
+      const missing = combos.filter((c) => {
+        const key = comboKey(c);
+        const r = state.results[key];
+        return !r || (!r.data && !r.loading);
+      });
+
+      if (!missing.length) {
+        showToast('All combinations already rendered');
+        return;
+      }
+
+      showToast(`Starting ${missing.length} renders...`);
+      batchCancelled.current = false;
+      const total = missing.length;
+      let done = 0;
+      const startTime = Date.now();
+      setBatchProgress({ done: 0, total, eta: 'starting...' });
+
+      for (let i = 0; i < missing.length; i += CONCURRENCY) {
+        if (batchCancelled.current) break;
+        const batch = missing.slice(i, i + CONCURRENCY);
+        await Promise.allSettled(
+          batch.map(async (combo) => {
+            if (batchCancelled.current) return;
+            const key = comboKey(combo);
+            const pieces: GeminiPiece[] = combo
+              .filter((c) => c.photo)
+              .map((c) => ({
+                name: `${c.catName}: ${c.optName}`,
+                data: c.photo!,
+                mime: c.mime!,
+                placement: c.placement,
+              }));
+
+            if (pieces.length === 0) {
+              console.warn('Skipping combo with no photos:', key);
+              done++;
+              return;
+            }
+
+            try {
+              const result = await callGemini(apiKey, model, pieces, state.project.room_photo!, state.project.room_mime!);
+              await saveVizRendering(projectId, key, result.imageMime, result.imageData);
+            } catch (e) {
+              console.error('Render failed for', key, e);
+              await saveVizRendering(projectId, key, null, null, (e as Error).message);
+            }
+            done++;
+            const elapsed = Date.now() - startTime;
+            const perItem = elapsed / done;
+            const remaining = (total - done) * perItem;
+            setBatchProgress({
+              done,
+              total,
+              eta: remaining < 60000 ? `~${Math.ceil(remaining / 1000)}s` : `~${Math.ceil(remaining / 60000)}min`,
+            });
+          })
+        );
+      }
+
+      await reload();
+      setBatchProgress(null);
+      showToast(batchCancelled.current ? 'Cancelled' : `Done — ${done} rendered`);
+    } catch (e) {
+      console.error('handleGenerateAll error:', e);
+      setBatchProgress(null);
+      showToast('Generation failed: ' + (e as Error).message);
+    }
   }
 
   // ── Room photo ──
@@ -238,9 +310,17 @@ export default function VisualizerPage() {
         mime = resized.mime;
       }
       const cat = state?.categories.find((c) => c.id === optCatId);
-      await addVizOption(optCatId, optName.trim(), photo, mime, cat?.options.length || 0);
+      await addVizOption(
+        optCatId,
+        optName.trim(),
+        photo,
+        mime,
+        cat?.options.length || 0,
+        optPlacement.trim() || null
+      );
       setOptModalOpen(false);
       setOptName('');
+      setOptPlacement('');
       setOptFile(null);
       setOptPreview('');
       setOptCatId(null);
@@ -296,6 +376,12 @@ export default function VisualizerPage() {
   const combos = getCombinations();
   const missingCount = combos.filter((c) => !state.results[comboKey(c)]?.data).length;
 
+  // Build formula string like "Rug(2) × Wallpaper(1) × Bookshelf(1) = 6"
+  const formulaParts = validCats.map((c) => `${c.name}(${c.options.length})`);
+  const formulaStr = formulaParts.length > 0
+    ? `${formulaParts.join(' × ')} = ${combos.length}`
+    : '';
+
   return (
     <>
       <ToastProvider />
@@ -334,7 +420,11 @@ export default function VisualizerPage() {
                 variant="secondary"
                 size="sm"
                 style={{ width: '100%' }}
-                onClick={() => { setRoomFile(null); setRoomPreview(''); setRoomModalOpen(true); }}
+                onClick={() => {
+                  setRoomFile(null);
+                  setRoomPreview('');
+                  setRoomModalOpen(true);
+                }}
               >
                 {state.project.room_photo ? 'Change Photo' : 'Upload Room Photo'}
               </Button>
@@ -378,6 +468,14 @@ export default function VisualizerPage() {
                       )}
                       <div className="flex-1 min-w-0">
                         <div className="text-xs font-semibold truncate">{opt.name}</div>
+                        {opt.placement && (
+                          <div
+                            className="text-xs mt-0.5 truncate"
+                            style={{ color: '#999', fontSize: '10px' }}
+                          >
+                            📍 {opt.placement}
+                          </div>
+                        )}
                       </div>
                       <button
                         onClick={() => handleRemoveOption(opt.id)}
@@ -397,6 +495,7 @@ export default function VisualizerPage() {
                     onClick={() => {
                       setOptCatId(cat.id);
                       setOptName('');
+                      setOptPlacement('');
                       setOptFile(null);
                       setOptPreview('');
                       setOptModalOpen(true);
@@ -409,7 +508,10 @@ export default function VisualizerPage() {
               <Button
                 variant="secondary"
                 style={{ width: '100%' }}
-                onClick={() => { setCatName(''); setCatModalOpen(true); }}
+                onClick={() => {
+                  setCatName('');
+                  setCatModalOpen(true);
+                }}
               >
                 + Add Category
               </Button>
@@ -423,34 +525,14 @@ export default function VisualizerPage() {
               className="flex items-center gap-2.5 flex-wrap"
               style={{ padding: '11px 32px', background: 'var(--bg-card)', borderBottom: '1px solid #e8e6e2' }}
             >
-              {validCats.length >= 2 && (
+              {combos.length > 0 && (
                 <>
-                  <label className="text-xs font-semibold" style={{ color: '#555' }}>Rows:</label>
-                  <select
-                    value={rowCatIdx}
-                    onChange={(e) => setRowCatIdx(Number(e.target.value))}
-                    className="text-xs rounded-lg cursor-pointer"
-                    style={{ padding: '6px 10px', border: '1px solid var(--border)', background: '#faf9f7' }}
-                  >
-                    {validCats.map((c, i) => (
-                      <option key={c.id} value={i} disabled={i === colCatIdx}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                  <label className="text-xs font-semibold" style={{ color: '#555' }}>Columns:</label>
-                  <select
-                    value={colCatIdx}
-                    onChange={(e) => setColCatIdx(Number(e.target.value))}
-                    className="text-xs rounded-lg cursor-pointer"
-                    style={{ padding: '6px 10px', border: '1px solid var(--border)', background: '#faf9f7' }}
-                  >
-                    {validCats.map((c, i) => (
-                      <option key={c.id} value={i} disabled={i === rowCatIdx}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
+                  <span className="text-xs font-semibold" style={{ color: '#555' }}>
+                    {combos.length} combination{combos.length !== 1 ? 's' : ''}
+                  </span>
+                  <span className="text-xs" style={{ color: '#aaa', fontFamily: 'monospace' }}>
+                    {formulaStr}
+                  </span>
                 </>
               )}
 
@@ -462,7 +544,13 @@ export default function VisualizerPage() {
                 </span>
               )}
               {batchProgress && (
-                <Button variant="secondary" size="sm" onClick={() => { batchCancelled.current = true; }}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    batchCancelled.current = true;
+                  }}
+                >
                   Cancel
                 </Button>
               )}
@@ -479,11 +567,11 @@ export default function VisualizerPage() {
 
             {/* Results Grid */}
             <div style={{ padding: '24px 32px 80px', flex: 1 }}>
-              {!state.project.room_photo || validCats.length < 2 ? (
+              {!state.project.room_photo || validCats.length === 0 ? (
                 <div className="text-center py-12 text-sm" style={{ color: 'var(--text-muted)' }}>
                   {!state.project.room_photo
-                    ? 'Upload a room photo and add at least 2 categories to get started.'
-                    : 'Add at least 2 categories with options to see combinations.'}
+                    ? 'Upload a room photo and add at least 1 category to get started.'
+                    : 'Add at least 1 category with options to see combinations.'}
                 </div>
               ) : combos.length === 0 ? (
                 <div className="text-center py-12 text-sm" style={{ color: 'var(--text-muted)' }}>
@@ -500,7 +588,11 @@ export default function VisualizerPage() {
                       <div
                         key={key}
                         className="rounded-xl overflow-hidden transition-all"
-                        style={{ background: 'var(--bg-card)', border: '1px solid var(--border)', cursor: r?.data ? 'pointer' : 'default' }}
+                        style={{
+                          background: 'var(--bg-card)',
+                          border: '1px solid var(--border)',
+                          cursor: r?.data ? 'pointer' : 'default',
+                        }}
                         onClick={() => {
                           if (r?.data) {
                             const allRendered = combos
@@ -515,8 +607,16 @@ export default function VisualizerPage() {
                             setLbOpen(true);
                           }
                         }}
-                        onMouseEnter={(e) => { e.currentTarget.style.borderColor = 'var(--border-hover)'; e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.09)'; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-                        onMouseLeave={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'none'; }}
+                        onMouseEnter={(e) => {
+                          e.currentTarget.style.borderColor = 'var(--border-hover)';
+                          e.currentTarget.style.boxShadow = '0 4px 20px rgba(0,0,0,0.09)';
+                          e.currentTarget.style.transform = 'translateY(-2px)';
+                        }}
+                        onMouseLeave={(e) => {
+                          e.currentTarget.style.borderColor = 'var(--border)';
+                          e.currentTarget.style.boxShadow = 'none';
+                          e.currentTarget.style.transform = 'none';
+                        }}
                       >
                         <div
                           className="flex items-center justify-center relative"
@@ -551,22 +651,40 @@ export default function VisualizerPage() {
                               <span className="text-xs" style={{ color: 'var(--danger)' }}>
                                 {r.error.slice(0, 120)}
                               </span>
-                              <Button variant="secondary" size="sm" onClick={(e) => { e.stopPropagation(); handleSingleGenerate(key); }}>
+                              <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSingleGenerate(key);
+                                }}
+                              >
                                 Retry
                               </Button>
                             </div>
                           ) : (
-                            <Button variant="secondary" size="sm" onClick={(e) => { e.stopPropagation(); handleSingleGenerate(key); }}>
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleSingleGenerate(key);
+                              }}
+                            >
                               Render
                             </Button>
                           )}
                         </div>
                         <div className="p-3 text-xs leading-relaxed" style={{ color: '#666' }}>
                           {combo.map((c, i) => (
-                            <span key={i}>
+                            <div key={i}>
                               <strong>{c.catName}:</strong> {c.optName}
-                              {i < combo.length - 1 && <br />}
-                            </span>
+                              {c.placement && (
+                                <span style={{ color: '#aaa', marginLeft: 6, fontSize: '10px' }}>
+                                  → {c.placement}
+                                </span>
+                              )}
+                            </div>
                           ))}
                         </div>
                       </div>
@@ -627,7 +745,9 @@ export default function VisualizerPage() {
           placeholder="e.g. Wallpaper, Crib, Carpet"
           className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none"
           style={{ border: '1.5px solid var(--border)', fontFamily: 'inherit' }}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleAddCategory(); }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleAddCategory();
+          }}
           autoFocus
         />
       </Modal>
@@ -657,6 +777,22 @@ export default function VisualizerPage() {
             style={{ border: '1.5px solid var(--border)', fontFamily: 'inherit' }}
             autoFocus
           />
+        </div>
+        <div className="mb-5">
+          <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-secondary)' }}>
+            Placement in Room
+          </label>
+          <input
+            type="text"
+            value={optPlacement}
+            onChange={(e) => setOptPlacement(e.target.value)}
+            placeholder="e.g. center of floor, back wall, right corner"
+            className="w-full rounded-xl px-3.5 py-2.5 text-sm outline-none"
+            style={{ border: '1.5px solid var(--border)', fontFamily: 'inherit' }}
+          />
+          <div className="mt-1.5 text-xs" style={{ color: 'var(--text-muted)' }}>
+            Tell the AI where to place this item in the room
+          </div>
         </div>
         <div>
           <label className="block text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--text-secondary)' }}>

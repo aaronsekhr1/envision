@@ -2,10 +2,11 @@
 
 import type { GeminiModel } from './types';
 
-interface GeminiPiece {
+export interface GeminiPiece {
   name: string;
   data: string; // base64
   mime: string;
+  placement?: string | null; // e.g. "center of room floor", "back wall"
 }
 
 interface GeminiResult {
@@ -55,7 +56,16 @@ export async function callGemini(
   // Step 1: Describe the room (text-only response)
   const descParts: Array<{ text?: string; inline_data?: { mime_type: string; data: string } }> = [
     {
-      text: `You are an interior design assistant. Describe this room photo in detail — layout, colors, existing furniture, flooring, walls, lighting, and any decor. Be specific and thorough. This description will be used to guide an image editing task.`,
+      text: `You are an interior design assistant. Describe this room photo in precise detail:
+- Room dimensions and layout (shape, proportions)
+- Wall colors, textures, and materials
+- Flooring type, color, and pattern
+- ALL existing furniture and decor — describe each piece, its position, and approximate size
+- Lighting sources and quality (natural light, lamps, overhead)
+- Windows, doors, and architectural features
+- Any rugs, artwork, plants, or accessories
+
+Be extremely thorough. This description will be used to ensure an image edit preserves every detail of the original room.`,
     },
     { inline_data: { mime_type: roomMime, data: roomData } },
   ];
@@ -64,22 +74,36 @@ export async function callGemini(
   const roomDesc =
     descResponse?.candidates?.[0]?.content?.parts?.[0]?.text || 'A room interior.';
 
+  // Step 2: Build placement-aware item list
+  const itemList = pieces
+    .map((p, i) => {
+      const placement = p.placement ? ` → PLACEMENT: ${p.placement}` : '';
+      return `${i + 1}. "${p.name}"${placement}`;
+    })
+    .join('\n');
+
   // Step 2: Generate the edited image
-  const pieceName = pieces.map((p) => p.name).join(' + ');
-  const editPrompt = `You are a photorealistic interior design renderer. You have a room photo and ${pieces.length === 1 ? 'a product image' : 'product images'}.
+  const editPrompt = `You are a photorealistic interior design renderer. You will edit a room photo to show how specific furniture/decor items would look in the space.
 
-ROOM DESCRIPTION: ${roomDesc}
+ROOM DESCRIPTION (from analysis of the original photo):
+${roomDesc}
 
-TASK: Edit the room photo to naturally incorporate ${pieceName}. Replace the main focal furniture piece with the product${pieces.length > 1 ? 's' : ''} shown. Keep EVERYTHING else in the room exactly the same — same walls, floor, lighting, other furniture, camera angle, and perspective.
+ITEMS TO PLACE — place ONLY these items, nothing else:
+${itemList}
 
-${productCtx ? `PRODUCT CONTEXT: ${productCtx}` : ''}
+${productCtx ? `ADDITIONAL CONTEXT: ${productCtx}` : ''}
 
-CRITICAL RULES:
-- Output a SINGLE photorealistic image of the room
-- The product must look naturally placed — correct scale, perspective, lighting, and shadows
-- Do NOT create a collage, split image, or side-by-side comparison
-- Do NOT add any text, labels, borders, or watermarks
-- Keep the original room photo's aspect ratio and camera angle`;
+STRICT RULES — follow ALL of these exactly:
+1. Place ONLY the items listed above into the room photo. Do NOT add, remove, replace, or modify ANY other furniture, decor, objects, or architectural features in the room.
+2. Each item MUST be placed at its specified PLACEMENT location. If no placement is specified, choose the most natural location for that type of item.
+3. Items must look naturally integrated — correct scale relative to the room, proper perspective matching the camera angle, realistic lighting and shadows consistent with the room's light sources.
+4. The room's walls, floor, ceiling, windows, doors, trim, and ALL existing furniture/decor NOT listed above must remain COMPLETELY UNCHANGED — pixel-perfect preservation.
+5. Output a SINGLE photorealistic photograph of the room with the items placed.
+6. Do NOT create a collage, split image, side-by-side comparison, mood board, or any multi-image layout.
+7. Do NOT add any text, labels, annotations, borders, watermarks, or UI elements.
+8. Preserve the exact camera angle, focal length, and aspect ratio of the original room photo.
+9. If an item is a wall treatment (wallpaper, paint, etc.), apply it to the specified wall while keeping all other walls unchanged.
+10. If an item is a floor covering (rug, carpet), place it on the floor at the specified location without removing the existing flooring underneath.`;
 
   const editParts: Array<{ text?: string; inline_data?: { mime_type: string; data: string } }> = [
     { text: editPrompt },

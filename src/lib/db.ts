@@ -221,7 +221,8 @@ export async function addVizOption(
   name: string,
   photo: string | null,
   mime: string | null,
-  sortOrder: number
+  sortOrder: number,
+  placement?: string | null
 ) {
   return dbInsert('visualizer_options', {
     category_id: categoryId,
@@ -229,6 +230,7 @@ export async function addVizOption(
     photo,
     mime,
     sort_order: sortOrder,
+    placement: placement || null,
   });
 }
 
