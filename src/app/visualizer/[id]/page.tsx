@@ -66,6 +66,9 @@ export default function VisualizerPage() {
   const [optPlacement, setOptPlacement] = useState('');
   const [catName, setCatName] = useState('');
 
+  // Category toggles — which categories are active in the current view
+  const [activeCatIds, setActiveCatIds] = useState<Set<number>>(new Set());
+
   // Lightbox
   const [lbOpen, setLbOpen] = useState(false);
   const [lbItems, setLbItems] = useState<{ src: string; label?: string }[]>([]);
@@ -75,6 +78,14 @@ export default function VisualizerPage() {
     try {
       const data = await loadVizState(projectId);
       setState(data);
+      // Initialize active categories to all categories with options on first load
+      setActiveCatIds((prev) => {
+        if (prev.size === 0) {
+          const allIds = data.categories.filter((c) => c.options.length > 0).map((c) => c.id);
+          return new Set(allIds);
+        }
+        return prev;
+      });
     } catch (e) {
       console.error(e);
       showToast('Failed to load project');
@@ -87,11 +98,23 @@ export default function VisualizerPage() {
     if (user) reload();
   }, [user, reload]);
 
+  function toggleCategory(catId: number) {
+    setActiveCatIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(catId)) {
+        next.delete(catId);
+      } else {
+        next.add(catId);
+      }
+      return next;
+    });
+  }
+
   // ── N-Category Cross-Product Combination Logic ──
 
   function getCombinations(): Combo[][] {
     if (!state) return [];
-    const validCats = state.categories.filter((c) => c.options.length > 0);
+    const validCats = state.categories.filter((c) => c.options.length > 0 && activeCatIds.has(c.id));
     if (validCats.length === 0) return [];
 
     // N-dimensional cross-product: multiply all categories together
@@ -372,12 +395,13 @@ export default function VisualizerPage() {
     );
   }
 
-  const validCats = state.categories.filter((c) => c.options.length > 0);
+  const allValidCats = state.categories.filter((c) => c.options.length > 0);
+  const activeCats = allValidCats.filter((c) => activeCatIds.has(c.id));
   const combos = getCombinations();
   const missingCount = combos.filter((c) => !state.results[comboKey(c)]?.data).length;
 
-  // Build formula string like "Rug(2) × Wallpaper(1) × Bookshelf(1) = 6"
-  const formulaParts = validCats.map((c) => `${c.name}(${c.options.length})`);
+  // Build formula string like "Rug(2) × Wallpaper(1) = 4"
+  const formulaParts = activeCats.map((c) => `${c.name}(${c.options.length})`);
   const formulaStr = formulaParts.length > 0
     ? `${formulaParts.join(' × ')} = ${combos.length}`
     : '';
@@ -520,22 +544,58 @@ export default function VisualizerPage() {
 
           {/* ── Main Area ── */}
           <div style={{ background: '#faf9f7', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            {/* Category Toggle Chips — separate row */}
+            {allValidCats.length > 0 && (
+              <div
+                style={{
+                  padding: '14px 32px',
+                  background: '#fff',
+                  borderBottom: '1px solid #e8e6e2',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <span className="text-xs font-bold uppercase" style={{ color: '#999', letterSpacing: '0.06em', marginRight: 4 }}>
+                  Show:
+                </span>
+                {allValidCats.map((cat) => {
+                  const isActive = activeCatIds.has(cat.id);
+                  return (
+                    <button
+                      key={cat.id}
+                      onClick={() => toggleCategory(cat.id)}
+                      style={{
+                        padding: '7px 18px',
+                        borderRadius: 999,
+                        border: isActive ? '2px solid #1a1a1a' : '2px solid #ddd',
+                        background: isActive ? '#1a1a1a' : '#fff',
+                        color: isActive ? '#fff' : '#888',
+                        fontSize: 13,
+                        fontWeight: 600,
+                        fontFamily: 'inherit',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      {cat.name} ({cat.options.length})
+                    </button>
+                  );
+                })}
+                {combos.length > 0 && (
+                  <span className="text-xs" style={{ color: '#aaa', fontFamily: 'monospace', marginLeft: 8 }}>
+                    {formulaStr}
+                  </span>
+                )}
+              </div>
+            )}
+
             {/* Toolbar */}
             <div
               className="flex items-center gap-2.5 flex-wrap"
               style={{ padding: '11px 32px', background: 'var(--bg-card)', borderBottom: '1px solid #e8e6e2' }}
             >
-              {combos.length > 0 && (
-                <>
-                  <span className="text-xs font-semibold" style={{ color: '#555' }}>
-                    {combos.length} combination{combos.length !== 1 ? 's' : ''}
-                  </span>
-                  <span className="text-xs" style={{ color: '#aaa', fontFamily: 'monospace' }}>
-                    {formulaStr}
-                  </span>
-                </>
-              )}
-
               <div style={{ flex: 1 }} />
 
               {batchProgress && (
@@ -567,7 +627,7 @@ export default function VisualizerPage() {
 
             {/* Results Grid */}
             <div style={{ padding: '24px 32px 80px', flex: 1 }}>
-              {!state.project.room_photo || validCats.length === 0 ? (
+              {!state.project.room_photo || allValidCats.length === 0 ? (
                 <div className="text-center py-12 text-sm" style={{ color: 'var(--text-muted)' }}>
                   {!state.project.room_photo
                     ? 'Upload a room photo and add at least 1 category to get started.'
@@ -575,7 +635,9 @@ export default function VisualizerPage() {
                 </div>
               ) : combos.length === 0 ? (
                 <div className="text-center py-12 text-sm" style={{ color: 'var(--text-muted)' }}>
-                  Add options to your categories to generate combinations.
+                  {activeCatIds.size === 0
+                    ? 'Toggle on some categories above to see combinations.'
+                    : 'Add options to your categories to generate combinations.'}
                 </div>
               ) : (
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>
