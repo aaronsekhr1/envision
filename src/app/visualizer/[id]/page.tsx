@@ -94,10 +94,10 @@ export default function VisualizerPage() {
     setLoading(false);
   }, [projectId, router]);
 
-  // Load on mount — middleware already verified auth and set cookies
+  // Wait for auth before loading — prevents race condition where user is null
   useEffect(() => {
-    reload();
-  }, [reload]);
+    if (user) reload();
+  }, [user, reload]);
 
   function toggleCategory(catId: number) {
     setActiveCatIds((prev) => {

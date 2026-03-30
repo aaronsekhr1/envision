@@ -43,6 +43,11 @@ html { scroll-behavior: smooth; }
   border-top-color: #999;
 }
 
+/* Card delete button — appears on hover */
+.card-delete-btn { opacity: 0 !important; }
+*:hover > .card-delete-btn { opacity: 1 !important; }
+.card-delete-btn:hover { background: var(--danger) !important; }
+
 /* Toast animation */
 @keyframes toast-in {
   from { opacity: 0; transform: translateX(-50%) translateY(10px); }

@@ -68,10 +68,10 @@ export default function DecisionPage() {
   const [lbIndex, setLbIndex] = useState(0);
   const [lbOpen, setLbOpen] = useState(false);
 
-  // Load state on mount — middleware already verified auth and set cookies
+  // Wait for auth before loading — prevents race condition where user is null
   useEffect(() => {
-    reload();
-  }, []);
+    if (user) reload();
+  }, [user]);
 
   // Keyboard navigation
   useEffect(() => {
@@ -674,74 +674,92 @@ export default function DecisionPage() {
               ))}
               <div />
 
-              {/* Rows: Options — each child must be a direct grid child */}
+              {/* Rows: Options — each child must be a direct grid child (Fragment, not div) */}
               {state.options.map((option, rowIdx) => (
                 <Fragment key={option.id}>
                   {/* Option label column */}
                   <div
-                    className="flex flex-col items-start gap-2"
                     style={{
-                      minHeight: 200,
-                      paddingRight: 8,
+                      paddingRight: 12,
                       gridColumn: '1',
                       gridRow: `${rowIdx + 2}`,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
                     }}
                   >
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => handleToggleStar(option.id, option.starred)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          cursor: 'pointer',
-                          fontSize: 18,
-                          padding: 0,
-                          lineHeight: 1,
-                        }}
-                      >
-                        {option.starred ? '⭐' : '☆'}
-                      </button>
-                      <input
-                        type="text"
-                        value={option.name}
-                        onChange={(e) => handleUpdateOptionName(option.id, e.target.value)}
-                        onBlur={(e) => handleUpdateOptionName(option.id, e.target.value)}
-                        className="text-xs outline-none px-2 py-1 rounded"
-                        style={{
-                          border: '1px solid var(--border)',
-                          background: '#faf9f7',
-                          flex: 1,
-                        }}
-                      />
-                    </div>
-                    <div className="flex flex-wrap gap-1">
+                    {/* Star on its own line */}
+                    <button
+                      onClick={() => handleToggleStar(option.id, option.starred)}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        fontSize: 16,
+                        padding: 0,
+                        lineHeight: 1,
+                        alignSelf: 'flex-start',
+                      }}
+                    >
+                      {option.starred ? '⭐' : '☆'}
+                    </button>
+
+                    {/* Name field */}
+                    <input
+                      type="text"
+                      value={option.name}
+                      onChange={(e) => handleUpdateOptionName(option.id, e.target.value)}
+                      onBlur={(e) => handleUpdateOptionName(option.id, e.target.value)}
+                      className="text-xs outline-none px-2 py-1.5 rounded-md"
+                      style={{
+                        border: '1px solid var(--border)',
+                        background: '#faf9f7',
+                        width: '100%',
+                        fontFamily: 'inherit',
+                        fontWeight: 500,
+                      }}
+                    />
+
+                    {/* Photos — inline with the name, bigger thumbnails */}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
                       {(state.photos[option.id] || []).map((photo) => (
                         <div
                           key={photo.id}
-                          className="rounded overflow-hidden flex-shrink-0"
+                          className="rounded-lg overflow-hidden"
                           style={{
-                            width: 52,
-                            height: 52,
+                            width: 72,
+                            height: 72,
                             background: '#f0f0f0',
+                            flexShrink: 0,
                           }}
                         >
                           {/* eslint-disable-next-line @next/next/no-img-element */}
                           <img
                             src={`data:${photo.mime};base64,${photo.data}`}
                             alt=""
-                            className="w-full h-full object-cover"
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                           />
                         </div>
                       ))}
                     </div>
-                    <Button
-                      variant="danger"
-                      size="sm"
+
+                    <button
                       onClick={() => handleDeleteOption(option.id)}
-                      style={{ padding: '4px 8px', fontSize: 11 }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        fontSize: 11,
+                        color: 'var(--text-muted)',
+                        cursor: 'pointer',
+                        padding: '2px 0',
+                        alignSelf: 'flex-start',
+                        transition: 'color 0.15s',
+                      }}
+                      onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--danger)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
                     >
                       Delete
-                    </Button>
+                    </button>
                   </div>
 
                   {/* Cells for this option */}
