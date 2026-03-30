@@ -374,15 +374,6 @@ export default function DecisionPage() {
     }
   }
 
-  async function handleToggleStar(optionId: number, starred: boolean) {
-    try {
-      await dbUpdate('options', optionId, { starred: !starred });
-      await reload();
-    } catch (err) {
-      showToast(`Error: ${(err as Error).message}`);
-    }
-  }
-
   async function handleUpdateOptionName(optionId: number, newName: string) {
     if (!newName.trim()) {
       showToast('Name cannot be empty');
@@ -525,22 +516,6 @@ export default function DecisionPage() {
           alt=""
           className="w-full h-full object-cover"
         />
-        <a
-          href={`data:${rendering.mime};base64,${rendering.data}`}
-          download={`${optionId}-${roomId}.jpg`}
-          onClick={(e) => e.stopPropagation()}
-          className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-          style={{
-            padding: '6px 10px',
-            background: 'rgba(0,0,0,0.6)',
-            color: 'white',
-            borderRadius: 6,
-            fontSize: 12,
-            textDecoration: 'none',
-          }}
-        >
-          Save
-        </a>
         {rendering.warning && (
           <div
             className="absolute bottom-2 left-2"
@@ -625,9 +600,24 @@ export default function DecisionPage() {
                 Mark Decided
               </Button>
             )}
-            <Button onClick={handleDeleteDecision} variant="danger" size="sm">
-              Delete
-            </Button>
+            <button
+              onClick={handleDeleteDecision}
+              style={{
+                background: 'none',
+                border: 'none',
+                fontSize: 16,
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                padding: '4px 8px',
+                borderRadius: 6,
+                transition: 'color 0.15s',
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--danger)')}
+              onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
+              title="Delete decision"
+            >
+              ×
+            </button>
           </div>
 
           {/* Grid */}
@@ -635,20 +625,20 @@ export default function DecisionPage() {
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: `180px repeat(${roomsCount}, 1fr) 50px`,
-                gap: '16px',
-                minWidth: 'fit-content',
+                gridTemplateColumns: `180px repeat(${roomsCount}, 340px) 44px`,
+                gap: '14px',
               }}
             >
-              {/* Header: Rooms */}
+              {/* Header row: blank corner + room thumbnails + blank */}
               <div />
               {state.rooms.map((room) => (
-                <div key={room.id} className="flex flex-col items-center gap-2">
+                <div key={room.id} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, position: 'relative' }}>
                   <div
-                    className="rounded-[12px] overflow-hidden flex-shrink-0"
                     style={{
-                      width: '100%',
-                      height: 180,
+                      width: 160,
+                      aspectRatio: '4/3',
+                      borderRadius: 10,
+                      overflow: 'hidden',
                       background: '#f0f0f0',
                     }}
                   >
@@ -656,20 +646,36 @@ export default function DecisionPage() {
                     <img
                       src={`data:${room.mime};base64,${room.data}`}
                       alt={room.name}
-                      className="w-full h-full object-cover"
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                     />
                   </div>
-                  <div style={{ fontSize: 12, fontWeight: 500, textAlign: 'center', wordBreak: 'break-word', maxWidth: '100%' }}>
+                  <div style={{ fontSize: 11, fontWeight: 500, textAlign: 'center', color: 'var(--text-secondary)' }}>
                     {room.name}
                   </div>
-                  <Button
-                    variant="danger"
-                    size="sm"
+                  <button
+                    className="card-delete-btn"
                     onClick={() => handleDeleteRoom(room.id)}
-                    style={{ padding: '4px 8px', fontSize: 11 }}
+                    style={{
+                      position: 'absolute',
+                      top: 6,
+                      right: 6,
+                      width: 22,
+                      height: 22,
+                      borderRadius: '50%',
+                      border: 'none',
+                      background: 'rgba(0,0,0,0.45)',
+                      color: 'white',
+                      fontSize: 13,
+                      lineHeight: 1,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'background 0.15s, opacity 0.15s',
+                    }}
                   >
-                    Delete
-                  </Button>
+                    ×
+                  </button>
                 </div>
               ))}
               <div />
@@ -686,24 +692,9 @@ export default function DecisionPage() {
                       display: 'flex',
                       flexDirection: 'column',
                       gap: 8,
+                      position: 'relative',
                     }}
                   >
-                    {/* Star on its own line */}
-                    <button
-                      onClick={() => handleToggleStar(option.id, option.starred)}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        cursor: 'pointer',
-                        fontSize: 16,
-                        padding: 0,
-                        lineHeight: 1,
-                        alignSelf: 'flex-start',
-                      }}
-                    >
-                      {option.starred ? '⭐' : '☆'}
-                    </button>
-
                     {/* Name field */}
                     <input
                       type="text"
@@ -744,21 +735,28 @@ export default function DecisionPage() {
                     </div>
 
                     <button
+                      className="card-delete-btn"
                       onClick={() => handleDeleteOption(option.id)}
                       style={{
-                        background: 'none',
+                        position: 'absolute',
+                        top: 4,
+                        right: 4,
+                        width: 22,
+                        height: 22,
+                        borderRadius: '50%',
                         border: 'none',
-                        fontSize: 11,
-                        color: 'var(--text-muted)',
+                        background: 'rgba(0,0,0,0.45)',
+                        color: 'white',
+                        fontSize: 13,
+                        lineHeight: 1,
                         cursor: 'pointer',
-                        padding: '2px 0',
-                        alignSelf: 'flex-start',
-                        transition: 'color 0.15s',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transition: 'background 0.15s, opacity 0.15s',
                       }}
-                      onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--danger)')}
-                      onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-muted)')}
                     >
-                      Delete
+                      ×
                     </button>
                   </div>
 
@@ -775,23 +773,40 @@ export default function DecisionPage() {
                     </div>
                   ))}
 
-                  {/* Add room button for this row */}
+                  {/* Add room/angle column button */}
                   <div
                     style={{
                       gridColumn: `${roomsCount + 2}`,
                       gridRow: `${rowIdx + 2}`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
                     }}
                   >
                     <button
                       onClick={() => setAddRoomOpen(true)}
-                      className="flex items-center justify-center rounded-[12px] border-2 border-dashed transition-colors hover:border-current"
+                      className="transition-colors"
                       style={{
-                        aspectRatio: '4/3',
-                        borderColor: 'var(--border)',
+                        width: '100%',
+                        height: '100%',
+                        minHeight: 60,
+                        borderRadius: 10,
+                        border: '2px dashed var(--border)',
                         background: 'transparent',
                         cursor: 'pointer',
-                        fontSize: 24,
-                        color: 'var(--text-secondary)',
+                        fontSize: 18,
+                        color: 'var(--text-muted)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.borderColor = 'var(--border-hover)';
+                        e.currentTarget.style.color = 'var(--text-secondary)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.borderColor = 'var(--border)';
+                        e.currentTarget.style.color = 'var(--text-muted)';
                       }}
                     >
                       +
